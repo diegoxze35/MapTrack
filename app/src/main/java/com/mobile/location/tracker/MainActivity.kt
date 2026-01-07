@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Settings // Importar icono de Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Cargar configuración de osmdroid
         Configuration.getInstance().load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
 
         setContent {
@@ -96,14 +97,21 @@ fun MainScreen(viewModel: LocationViewModel) {
                     icon = { Icon(Icons.Default.History, contentDescription = "History") },
                     label = { Text("History") }
                 )
+                // Opción 3: Settings
+                NavigationBarItem(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                    label = { Text("Settings") }
+                )
             }
         }
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
-            if (selectedTab == 0) {
-                TrackerMapScreen(viewModel)
-            } else {
-                HistoryScreen(viewModel)
+            when (selectedTab) {
+                0 -> TrackerMapScreen(viewModel)
+                1 -> HistoryScreen(viewModel)
+                2 -> SettingsScreen(viewModel) // Nueva pantalla de configuración
             }
         }
     }
@@ -111,12 +119,9 @@ fun MainScreen(viewModel: LocationViewModel) {
 
 @Composable
 fun TrackerMapScreen(viewModel: LocationViewModel) {
-    val context = LocalContext.current
     val locations by viewModel.allLocations.collectAsState(initial = emptyList())
 
-    val settings by viewModel.settingFlow.collectAsState()
-    val (selectedInterval, isServiceRunning) = settings
-
+    // Solicitar permisos al iniciar la pantalla del mapa
     val permissions = mutableListOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION
@@ -128,71 +133,80 @@ fun TrackerMapScreen(viewModel: LocationViewModel) {
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
-        // Handle results if needed
-    }
+    ) { _ -> }
 
     LaunchedEffect(Unit) {
         launcher.launch(permissions.toTypedArray())
     }
 
+    // Solo mostramos el mapa, los controles se movieron a SettingsScreen
     Column(modifier = Modifier.fillMaxSize()) {
-        Box(modifier = Modifier.weight(1f)) {
-            OSMView(locations)
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(16.dp)
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                        shape = MaterialTheme.shapes.medium
-                    )
-                    .padding(8.dp)
-            ) {
-                Text("Update Interval", style = MaterialTheme.typography.labelMedium)
-                IntervalOption(
-                    "10 sec",
-                    10000L,
-                    selectedInterval
-                ) { viewModel.updateState(interval = it, isServiceRunning) }
-                IntervalOption(
-                    "60 sec",
-                    60000L,
-                    selectedInterval
-                ) { viewModel.updateState(interval = it, isServiceRunning) }
-                IntervalOption(
-                    "5 min",
-                    300000L,
-                    selectedInterval
-                ) { viewModel.updateState(interval = it, isServiceRunning) }
+        OSMView(locations)
+    }
+}
 
+@Composable
+fun SettingsScreen(viewModel: LocationViewModel) {
+    val context = LocalContext.current
+    val settings by viewModel.settingFlow.collectAsState()
+    val (selectedInterval, isServiceRunning) = settings
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Text("Settings", style = MaterialTheme.typography.headlineMedium)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Update Interval", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        val intent = Intent(context, LocationTrackerService::class.java).apply {
-                            action =
-                                if (isServiceRunning) LocationTrackerService.ACTION_STOP else LocationTrackerService.ACTION_START
-                            putExtra(LocationTrackerService.EXTRA_INTERVAL, selectedInterval)
-                        }
-                        if (isServiceRunning) {
-                            context.stopService(intent)
-                        } else {
-                            ContextCompat.startForegroundService(context, intent)
-                        }
-                        viewModel.updateState(
-                            isServiceRunning = !isServiceRunning,
-                            interval = selectedInterval
-                        )
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isServiceRunning) Color.Red else Color.Green
-                    )
-                ) {
-                    Text(if (isServiceRunning) "Stop Tracker" else "Start Tracker")
+                // Opciones de intervalo
+                IntervalOption("10 sec", 10000L, selectedInterval) {
+                    viewModel.updateState(interval = it, isServiceRunning)
+                }
+                IntervalOption("60 sec", 60000L, selectedInterval) {
+                    viewModel.updateState(interval = it, isServiceRunning)
+                }
+                IntervalOption("5 min", 300000L, selectedInterval) {
+                    viewModel.updateState(interval = it, isServiceRunning)
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Botón para iniciar/detener el servicio
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            onClick = {
+                val intent = Intent(context, LocationTrackerService::class.java).apply {
+                    action = if (isServiceRunning) LocationTrackerService.ACTION_STOP else LocationTrackerService.ACTION_START
+                    putExtra(LocationTrackerService.EXTRA_INTERVAL, selectedInterval)
+                }
+                if (isServiceRunning) {
+                    context.stopService(intent)
+                } else {
+                    ContextCompat.startForegroundService(context, intent)
+                }
+                viewModel.updateState(
+                    isServiceRunning = !isServiceRunning,
+                    interval = selectedInterval
+                )
+            },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isServiceRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            )
+        ) {
+            Text(if (isServiceRunning) "Stop Tracker" else "Start Tracker")
         }
     }
 }
@@ -201,7 +215,7 @@ fun TrackerMapScreen(viewModel: LocationViewModel) {
 fun IntervalOption(label: String, value: Long, selected: Long, onSelect: (Long) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         RadioButton(selected = value == selected, onClick = { onSelect(value) })
-        Text(label, style = MaterialTheme.typography.bodySmall)
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -219,10 +233,15 @@ fun OSMView(locations: List<LocationEntity>) {
             if (locations.isNotEmpty()) {
                 val sortedLocations = locations.sortedBy { it.timestamp }
                 val geoPoints = sortedLocations.map { GeoPoint(it.latitude, it.longitude) }
+
                 mapView.overlays.clear()
+
+                // Dibujar línea de ruta
                 val line = Polyline()
                 line.setPoints(geoPoints)
                 mapView.overlays.add(line)
+
+                // Dibujar marcadores
                 geoPoints.forEach { point ->
                     val marker = Marker(mapView)
                     marker.position = point
@@ -230,6 +249,8 @@ fun OSMView(locations: List<LocationEntity>) {
                     marker.title = "Lat: ${point.latitude}, Lon: ${point.longitude}"
                     mapView.overlays.add(marker)
                 }
+
+                // Centrar en el último punto
                 mapView.controller.setCenter(geoPoints.last())
                 mapView.invalidate()
             }
